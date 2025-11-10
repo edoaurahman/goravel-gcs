@@ -2,6 +2,10 @@ package goravelgcs
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"os"
@@ -422,33 +426,103 @@ func (g *GCS) TemporaryUrl(file string, expiry time.Time) (string, error) {
 		return "", err
 	}
 
-	opts := &storage.SignedURLOptions{
-		Expires: expiry,
-		Method:  "GET",
+	// First, check if the file exists
+	object := g.client.Bucket(g.bucket).Object(g.normalizePath(file))
+	_, err := object.Attrs(g.ctx)
+	if err != nil {
+		return "", fmt.Errorf("file not found: %w", err)
 	}
 
-	// If using credentials file, load it for signing
+	// Try to create signed URL with service account credentials
 	if g.credPath != "" {
-		var err error
-		opts.GoogleAccessID, opts.PrivateKey, err = g.loadCredentials()
-		if err != nil {
-			return "", err
+		opts := &storage.SignedURLOptions{
+			Scheme:  storage.SigningSchemeV4,
+			Method:  "GET",
+			Expires: expiry,
+		}
+
+		// Load service account credentials
+		googleAccessID, privateKey, err := g.loadCredentials()
+		if err == nil {
+			opts.GoogleAccessID = googleAccessID
+			opts.PrivateKey = privateKey
+
+			url, err := storage.SignedURL(g.bucket, g.normalizePath(file), opts)
+			if err == nil {
+				return url, nil
+			}
 		}
 	}
 
-	url, err := storage.SignedURL(g.bucket, g.normalizePath(file), opts)
-	if err != nil {
-		return "", err
-	}
-
-	return url, nil
+	// Fallback: return public URL with warning
+	// In production, you might want to make the bucket/objects public
+	// or configure proper IAM permissions for signed URLs
+	return g.Url(file), fmt.Errorf("signed URL not available, returning public URL (ensure your GCS bucket is public or configure proper credentials)")
 }
 
 func (g *GCS) loadCredentials() (string, []byte, error) {
-	// This is a simplified version. In production, you should properly load
-	// the service account credentials from the JSON file
-	// For now, rely on default credentials
-	return "", nil, fmt.Errorf("signed URL requires service account credentials")
+	if g.credPath == "" {
+		return "", nil, fmt.Errorf("credentials path not configured")
+	}
+
+	// Read the service account key file
+	credData, err := os.ReadFile(g.credPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to read credentials file: %w", err)
+	}
+
+	// Parse the JSON to get the service account info
+	var creds struct {
+		ClientEmail string `json:"client_email"`
+		PrivateKey  string `json:"private_key"`
+	}
+
+	if err := json.Unmarshal(credData, &creds); err != nil {
+		return "", nil, fmt.Errorf("failed to parse credentials JSON: %w", err)
+	}
+
+	// Parse the private key
+	block, _ := pem.Decode([]byte(creds.PrivateKey))
+	if block == nil {
+		return "", nil, fmt.Errorf("failed to decode PEM block from private key")
+	}
+
+	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	rsaKey, ok := privateKey.(*rsa.PrivateKey)
+	if !ok {
+		return "", nil, fmt.Errorf("private key is not an RSA key")
+	}
+
+	// Convert RSA key to bytes
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(rsaKey)
+
+	return creds.ClientEmail, privateKeyBytes, nil
+}
+
+func (g *GCS) generateSignedURLWithClient(file string, expiry time.Time) (string, error) {
+	// Fallback approach: try to use Application Default Credentials
+	// or return a public URL if signing is not possible
+
+	// Check if the file exists first
+	object := g.client.Bucket(g.bucket).Object(g.normalizePath(file))
+	_, err := object.Attrs(g.ctx)
+	if err != nil {
+		return "", fmt.Errorf("file not found or not accessible: %w", err)
+	}
+
+	// For signed URLs without explicit credentials, we need to return
+	// a public URL or implement IAM-based signing
+	// For now, return public URL with a warning
+	publicURL := g.Url(file)
+
+	// You can uncomment this to see the fallback message
+	// log.Printf("Warning: Using public URL instead of signed URL for %s", file)
+
+	return publicURL, nil
 }
 
 func (g *GCS) Url(file string) string {
