@@ -56,6 +56,12 @@ GCS_PROJECT_ID=your-gcp-project-id
 GCS_BUCKET=your-bucket-name
 GCS_CREDENTIALS_PATH=/path/to/service-account-key.json
 GCS_URL=https://storage.googleapis.com/your-bucket-name
+
+# Optional: second disk / second bucket
+GCS_BUCKET_A=your-bucket-a
+GCS_BUCKET_B=your-bucket-b
+GCS_URL_A=https://storage.googleapis.com/your-bucket-a
+GCS_URL_B=https://storage.googleapis.com/your-bucket-b
 ```
 
 ### 3. Configure Filesystem Disk
@@ -69,6 +75,25 @@ Add the GCS disk configuration to `config/filesystems.go`:
     "bucket":      config.Env("GCS_BUCKET"),
     "credentials": config.Env("GCS_CREDENTIALS_PATH"),
     "url":         config.Env("GCS_URL"),
+},
+```
+
+For cross-bucket copy/move, configure two disks:
+
+```go
+"gcs_a": map[string]any{
+    "driver":      "gcs",
+    "project_id":  config.Env("GCS_PROJECT_ID"),
+    "bucket":      config.Env("GCS_BUCKET_A"),
+    "credentials": config.Env("GCS_CREDENTIALS_PATH"),
+    "url":         config.Env("GCS_URL_A"),
+},
+"gcs_b": map[string]any{
+    "driver":      "gcs",
+    "project_id":  config.Env("GCS_PROJECT_ID"),
+    "bucket":      config.Env("GCS_BUCKET_B"),
+    "credentials": config.Env("GCS_CREDENTIALS_PATH"),
+    "url":         config.Env("GCS_URL_B"),
 },
 ```
 
@@ -100,6 +125,33 @@ url, err := facades.Storage().Disk("gcs").TemporaryUrl(
     time.Now().Add(15*time.Minute),
 )
 ```
+
+### Server-side copy / move across buckets (disk A -> disk B)
+
+```go
+import (
+    goravelgcs "github.com/edoaurahman/goravel-gcs"
+    goravelgcsfacades "github.com/edoaurahman/goravel-gcs/facades"
+)
+
+driver, _ := goravelgcsfacades.GCS("gcs_a")
+gcs := driver.(*goravelgcs.GCS)
+
+// Server-side copy: object is copied inside GCS (no download to app/client).
+err := gcs.CopyToDisk("gcs_b", "uploads/a.jpg", "archive/a.jpg")
+
+// Server-side move: copy first, then delete source object.
+err = gcs.MoveToDisk("gcs_b", "uploads/a.jpg", "archive/a.jpg")
+
+// Optional facade helpers:
+err = goravelgcsfacades.CopyToDisk("gcs_a", "gcs_b", "uploads/a.jpg", "archive/a.jpg")
+err = goravelgcsfacades.MoveToDisk("gcs_a", "gcs_b", "uploads/a.jpg", "archive/a.jpg")
+```
+
+Implementation note:
+- Cross-disk copy uses GCS server-side copy (`dstObject.CopierFrom(srcObject).Run(ctx)`).
+- Cross-disk move performs server-side copy and then deletes the source object.
+- Current implementation expects both disks to use the same credentials file path when both are explicitly configured with credentials.
 
 ## Testing
 

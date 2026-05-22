@@ -30,6 +30,24 @@ type GCS struct {
 	credPath  string
 }
 
+var defaultResolveDiskConfig = func(disk string) (bucket, credentials string, err error) {
+	bucket = facades.Config().GetString(fmt.Sprintf("filesystems.disks.%s.bucket", disk))
+	if bucket == "" {
+		return "", "", fmt.Errorf("bucket configuration is empty for disk %s", disk)
+	}
+
+	credentials = facades.Config().GetString(fmt.Sprintf("filesystems.disks.%s.credentials", disk))
+	return bucket, credentials, nil
+}
+
+var defaultRunCopierFrom = func(ctx context.Context, client *storage.Client, srcBucket, srcFile, dstBucket, dstFile string) error {
+	srcObject := client.Bucket(srcBucket).Object(srcFile)
+	dstObject := client.Bucket(dstBucket).Object(dstFile)
+
+	_, err := dstObject.CopierFrom(srcObject).Run(ctx)
+	return err
+}
+
 func NewGCS() *GCS {
 	return &GCS{
 		ctx: context.Background(),
@@ -140,11 +158,31 @@ func (g *GCS) Copy(oldFile, newFile string) error {
 		return err
 	}
 
-	srcObject := g.client.Bucket(g.bucket).Object(g.normalizePath(oldFile))
-	dstObject := g.client.Bucket(g.bucket).Object(g.normalizePath(newFile))
+	return defaultRunCopierFrom(g.ctx, g.client, g.bucket, g.normalizePath(oldFile), g.bucket, g.normalizePath(newFile))
+}
 
-	_, err := dstObject.CopierFrom(srcObject).Run(g.ctx)
-	return err
+func (g *GCS) CopyToDisk(destinationDisk, oldFile, newFile string) error {
+	if err := g.init(); err != nil {
+		return err
+	}
+
+	destinationBucket, destinationCredentials, err := defaultResolveDiskConfig(destinationDisk)
+	if err != nil {
+		return err
+	}
+
+	if g.credPath != "" && destinationCredentials != "" && g.credPath != destinationCredentials {
+		return fmt.Errorf("copy across disks with different credentials files is not supported: source %s, destination %s", g.disk, destinationDisk)
+	}
+
+	return defaultRunCopierFrom(
+		g.ctx,
+		g.client,
+		g.bucket,
+		g.normalizePath(oldFile),
+		destinationBucket,
+		g.normalizePath(newFile),
+	)
 }
 
 func (g *GCS) Delete(files ...string) error {
@@ -337,6 +375,14 @@ func (g *GCS) Move(oldFile, newFile string) error {
 	if err := g.Copy(oldFile, newFile); err != nil {
 		return err
 	}
+	return g.Delete(oldFile)
+}
+
+func (g *GCS) MoveToDisk(destinationDisk, oldFile, newFile string) error {
+	if err := g.CopyToDisk(destinationDisk, oldFile, newFile); err != nil {
+		return err
+	}
+
 	return g.Delete(oldFile)
 }
 
