@@ -10,14 +10,14 @@ import (
 )
 
 func TestCopyToDiskUsesServerSideCopier(t *testing.T) {
-	originalResolveDiskConfig := resolveDiskConfig
-	originalRunCopierFrom := runCopierFrom
+	originalResolveDiskConfig := defaultResolveDiskConfig
+	originalRunCopierFrom := defaultRunCopierFrom
 	defer func() {
-		resolveDiskConfig = originalResolveDiskConfig
-		runCopierFrom = originalRunCopierFrom
+		defaultResolveDiskConfig = originalResolveDiskConfig
+		defaultRunCopierFrom = originalRunCopierFrom
 	}()
 
-	resolveDiskConfig = func(disk string) (bucket, credentials string, err error) {
+	defaultResolveDiskConfig = func(disk string) (bucket, credentials string, err error) {
 		if disk != "gcs_b" {
 			t.Fatalf("unexpected destination disk: %s", disk)
 		}
@@ -26,7 +26,7 @@ func TestCopyToDiskUsesServerSideCopier(t *testing.T) {
 	}
 
 	copierCalled := false
-	runCopierFrom = func(_ context.Context, _ *storage.Client, srcBucket, srcFile, dstBucket, dstFile string) error {
+	defaultRunCopierFrom = func(_ context.Context, _ *storage.Client, srcBucket, srcFile, dstBucket, dstFile string) error {
 		copierCalled = true
 
 		if srcBucket != "bucket-a" {
@@ -62,18 +62,18 @@ func TestCopyToDiskUsesServerSideCopier(t *testing.T) {
 }
 
 func TestCopyToDiskRejectsDifferentCredentialFiles(t *testing.T) {
-	originalResolveDiskConfig := resolveDiskConfig
-	originalRunCopierFrom := runCopierFrom
+	originalResolveDiskConfig := defaultResolveDiskConfig
+	originalRunCopierFrom := defaultRunCopierFrom
 	defer func() {
-		resolveDiskConfig = originalResolveDiskConfig
-		runCopierFrom = originalRunCopierFrom
+		defaultResolveDiskConfig = originalResolveDiskConfig
+		defaultRunCopierFrom = originalRunCopierFrom
 	}()
 
-	resolveDiskConfig = func(disk string) (bucket, credentials string, err error) {
+	defaultResolveDiskConfig = func(disk string) (bucket, credentials string, err error) {
 		return "bucket-b", "/tmp/destination-creds.json", nil
 	}
 
-	runCopierFrom = func(_ context.Context, _ *storage.Client, _, _, _, _ string) error {
+	defaultRunCopierFrom = func(_ context.Context, _ *storage.Client, srcBucket, srcFile, dstBucket, dstFile string) error {
 		return errors.New("copier should not be called")
 	}
 

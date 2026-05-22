@@ -30,7 +30,7 @@ type GCS struct {
 	credPath  string
 }
 
-var resolveDiskConfig = func(disk string) (bucket, credentials string, err error) {
+var defaultResolveDiskConfig = func(disk string) (bucket, credentials string, err error) {
 	bucket = facades.Config().GetString(fmt.Sprintf("filesystems.disks.%s.bucket", disk))
 	if bucket == "" {
 		return "", "", fmt.Errorf("bucket configuration is empty for disk %s", disk)
@@ -40,7 +40,7 @@ var resolveDiskConfig = func(disk string) (bucket, credentials string, err error
 	return bucket, credentials, nil
 }
 
-var runCopierFrom = func(ctx context.Context, client *storage.Client, srcBucket, srcFile, dstBucket, dstFile string) error {
+var defaultRunCopierFrom = func(ctx context.Context, client *storage.Client, srcBucket, srcFile, dstBucket, dstFile string) error {
 	srcObject := client.Bucket(srcBucket).Object(srcFile)
 	dstObject := client.Bucket(dstBucket).Object(dstFile)
 
@@ -158,7 +158,7 @@ func (g *GCS) Copy(oldFile, newFile string) error {
 		return err
 	}
 
-	return runCopierFrom(g.ctx, g.client, g.bucket, g.normalizePath(oldFile), g.bucket, g.normalizePath(newFile))
+	return defaultRunCopierFrom(g.ctx, g.client, g.bucket, g.normalizePath(oldFile), g.bucket, g.normalizePath(newFile))
 }
 
 func (g *GCS) CopyToDisk(destinationDisk, oldFile, newFile string) error {
@@ -166,7 +166,7 @@ func (g *GCS) CopyToDisk(destinationDisk, oldFile, newFile string) error {
 		return err
 	}
 
-	destinationBucket, destinationCredentials, err := resolveDiskConfig(destinationDisk)
+	destinationBucket, destinationCredentials, err := defaultResolveDiskConfig(destinationDisk)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (g *GCS) CopyToDisk(destinationDisk, oldFile, newFile string) error {
 		return fmt.Errorf("copy across disks with different credentials files is not supported: source %s, destination %s", g.disk, destinationDisk)
 	}
 
-	return runCopierFrom(
+	return defaultRunCopierFrom(
 		g.ctx,
 		g.client,
 		g.bucket,

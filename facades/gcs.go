@@ -15,7 +15,7 @@ func GCS(disk string) (filesystem.Driver, error) {
 	return instance.(*goravelgcs.GCS), nil
 }
 
-func GCSDriver(disk string) (*goravelgcs.GCS, error) {
+func GCSForDisk(disk string) (*goravelgcs.GCS, error) {
 	instance, err := goravelgcs.App.MakeWith(goravelgcs.Binding, map[string]any{"disk": disk})
 	if err != nil {
 		return nil, err
@@ -25,7 +25,7 @@ func GCSDriver(disk string) (*goravelgcs.GCS, error) {
 }
 
 func CopyToDisk(sourceDisk, destinationDisk, oldFile, newFile string) error {
-	driver, err := GCSDriver(sourceDisk)
+	driver, err := GCSForDisk(sourceDisk)
 	if err != nil {
 		return err
 	}
@@ -34,7 +34,7 @@ func CopyToDisk(sourceDisk, destinationDisk, oldFile, newFile string) error {
 }
 
 func MoveToDisk(sourceDisk, destinationDisk, oldFile, newFile string) error {
-	driver, err := GCSDriver(sourceDisk)
+	driver, err := GCSForDisk(sourceDisk)
 	if err != nil {
 		return err
 	}
